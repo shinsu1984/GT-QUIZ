@@ -891,6 +891,7 @@ function vAdmin(){
 function vAdminResults(){
   var ad=S.admin,f=S.aStage;
   var h='<div class="row2"><button class="btn btn-primary" data-act="refresh">'+ic("retry")+' 새로고침</button><button class="btn" data-act="csv">'+ic("save")+' CSV 저장</button></div>';
+  if((ad&&ad.results||[]).length)h+='<button class="btn btn-sm btn-ghost" data-act="del-all" style="margin-top:6px;color:var(--bad,#c0392b)">'+ic("trash")+' 테스트 기록 전체 삭제</button>';
   if(!db)h+='<div class="card pad" style="margin-top:10px"><div class="field" style="margin-bottom:8px"><label for="imp-text">카톡으로 받은 결과 붙여넣기</label><textarea id="imp-text"></textarea></div><button class="btn btn-block" data-act="import">불러오기</button></div>';
   if(!ad)return h+'<div class="card" style="margin-top:12px"><div class="empty">불러오는 중…</div></div>';
   var all=(ad.results||[]).slice().sort(function(x,y){return x.d<y.d?1:-1;});
@@ -1045,6 +1046,10 @@ app.addEventListener("click",function(ev){
     case"del-result":{var id=el.getAttribute("data-id");confirmBox("이 기록을 지울까요?","지운 뒤 랭킹도 다시 계산돼요.","지우기",function(){
       if(!db){var b=inbox();b.results=b.results.filter(function(r){return r.n+"|"+r.d!==id;});saveInbox(b);loadAdmin().then(render);return;}
       col("results").doc(id).delete().then(function(){S.admin.results=S.admin.results.filter(function(r){return r._id!==id;});return rebuildBoard(S.admin.results);}).then(function(){toast("지웠어요.");render();}).catch(function(e){fbFail(e);toast("실패했어요: "+S.fbErr);});});break;}
+    case"del-all":{var everyone=(S.admin.results||[]).slice();if(!everyone.length)break;
+      confirmBox("응시 기록을 전부 지울까요?","지금까지 쌓인 "+everyone.length+"건(테스트 포함 모든 사람)이 지워지고 랭킹도 초기화돼요. 되돌릴 수 없어요.","전부 지우기",function(){
+        if(!db){saveInbox({results:[],proposals:inbox().proposals});loadAdmin().then(function(){toast("모두 지웠어요.");render();});return;}
+        Promise.all(everyone.map(function(r){return col("results").doc(r._id).delete();})).then(function(){S.admin.results=[];return rebuildBoard([]);}).then(function(){toast("모두 지웠어요.");render();}).catch(function(e){fbFail(e);toast("실패했어요: "+S.fbErr);});});break;}
     case"adopt":{var pid=el.getAttribute("data-p"),p=(S.admin.proposals||[]).filter(function(x){return x.pid===pid;})[0];if(!p)break;
       S.formErr="";S.modal={type:"qedit",isNew:true,fromProposal:pid,q:{id:uid("q"),cat:catObj(p.cat)?p.cat:(DATA.cats[0]||{}).id,d:p.d||2,type:p.type==="ox"?"ox":"mc",q:p.q||"",opts:(p.opts||[]).slice(),ans:typeof p.ans==="number"?p.ans:0,exp:p.exp||""}};render();break;}
     case"del-prop":{var pid2=el.getAttribute("data-p");removeProposal(pid2);break;}
