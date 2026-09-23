@@ -419,18 +419,17 @@ p{margin:0;}
 <body>
 <script id="app-config">
 /* ============ 설정 ============
-   firebase : 수학여행 앱과 같은 Firebase 프로젝트를 씁니다.
-              다른 프로젝트를 쓰려면 Firebase 콘솔의 웹 앱 설정값으로 바꿔 넣으세요.
+   firebase : GT 퀴즈 전용 Firebase 프로젝트(gt-quiz-cd945) 설정값
    prefix   : 이 앱이 쓰는 Firestore 컬렉션 이름 앞부분 (수학여행 데이터와 섞이지 않게 구분)
    ============================== */
 window.GTQ_CONFIG = {
   firebase: {
-    apiKey: "AIzaSyCSFQUyZ4jkMdHmcb_7qPz8sNNzw64yZ9A",
-    authDomain: "daeui-trip.firebaseapp.com",
-    projectId: "daeui-trip",
-    storageBucket: "daeui-trip.firebasestorage.app",
-    messagingSenderId: "1054408940868",
-    appId: "1:1054408940868:web:8342e0e23465251e444b11"
+    apiKey: "AIzaSyDuuh8leiVI9532lE42HJ9nYZQakUVpenM",
+    authDomain: "gt-quiz-cd945.firebaseapp.com",
+    projectId: "gt-quiz-cd945",
+    storageBucket: "gt-quiz-cd945.firebasestorage.app",
+    messagingSenderId: "779870558983",
+    appId: "1:779870558983:web:34670a1486c7739b8a83a2"
   },
   prefix: "gtq_"
 };
@@ -935,7 +934,7 @@ function vAdminSettings(){
     '<button type="submit" class="btn btn-primary btn-block">설정 적용</button><p class="hint">적용 후 아래 [저장하기]를 눌러야 모두에게 반영돼요.</p></form>';
 }
 function vGuide(){
-  var rules="rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    // (기존 수학여행 앱 규칙은 그대로 두고 아래만 추가)\n    match /"+PFX+"results/{id}   { allow read, write: if true; }\n    match /"+PFX+"board/{id}     { allow read, write: if true; }\n    match /"+PFX+"config/{id}    { allow read, write: if true; }\n    match /"+PFX+"proposals/{id} { allow read, write: if true; }\n  }\n}";
+  var rules="rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    // GT 퀴즈 전용 프로젝트 규칙\n    match /"+PFX+"results/{id}   { allow read, write: if true; }\n    match /"+PFX+"board/{id}     { allow read, write: if true; }\n    match /"+PFX+"config/{id}    { allow read, write: if true; }\n    match /"+PFX+"proposals/{id} { allow read, write: if true; }\n  }\n}";
   return'<div class="card pad guide">'+
     '<h3 style="margin-top:0">서버 상태</h3><p>'+(!db?'<b>설정 안 됨</b> — index.html 위쪽 <code>firebase</code> 설정을 채우면 실시간 랭킹이 켜져요.':S.fb==="err"?'<b>연결 오류</b> — '+esc(S.fbErr):'<b>연결됨</b> — 결과·랭킹·문항이 Firebase에 저장돼요. (프로젝트: '+esc(FBCFG.projectId||"")+', 컬렉션 이름 앞에 <code>'+esc(PFX)+'</code>)')+'</p>'+
     '<h3>연결 오류(permission-denied)가 나면</h3><p>Firebase 콘솔 → Firestore Database → 규칙(Rules)에 아래 네 줄을 추가하고 [게시]를 눌러 주세요.</p><pre>'+esc(rules)+'</pre>'+
