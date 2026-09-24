@@ -518,7 +518,13 @@ function rankFor(score){var r=ranksSorted();for(var i=0;i<r.length;i++)if(score>
 function passScore(){return +DATA.meta.passScore||60;}
 function progress(){return lsGet("gtq_prog2",{});}
 function bestOf(sid){var p=progress()[sid];return p&&p.best?p.best.s:null;}
-function officialOf(sid){var p=progress()[sid];return p&&p.first?p.first:null;}
+function boardRowMe(){if(!S.player.name)return null;var n=S.player.name,g=S.player.group||"",hit=null;(BOARD.rows||[]).forEach(function(r){if(r.n===n&&(r.g||"")===g)hit=r;});return hit;}
+// 공식 기록은 서버(랭킹)가 기준이에요: 관리자가 랭킹에서 지우면, 그 사람 폰에도 곧바로 "아직 응시 전"으로 보이고 다음 도전이 새 공식 기록이 돼요.
+// 서버 연결이 없을 때만 이 기기에 저장된 첫 시도 기록을 기준으로 써요.
+function officialOf(sid){
+  if(db){var row=boardRowMe();return row&&row.sc&&row.sc[sid]!=null?{s:row.sc[sid]}:null;}
+  var p=progress()[sid];return p&&p.first?p.first:null;
+}
 function unlocked(i){if(!DATA.meta.lockStages||i<=0)return true;var b=bestOf(stages()[i-1].id);return b!=null&&b>=passScore();}
 function peppers(n){var h='<span class="peps">';for(var i=1;i<=3;i++)h+=ic("chili",i<=n?"":"off");return h+"</span>";}
 function totalOf(sc){var t=0;stages().forEach(function(s){if(sc&&sc[s.id]!=null)t+=sc[s.id];});return t;}
@@ -555,7 +561,25 @@ function fbFail(e){S.fb="err";S.fbErr=(e&&e.code)||String(e&&e.message||e);}
 function boardFromDoc(d){var rows=d&&d.rows||{};return{at:d&&d.at&&d.at.toDate?d.at.toDate().toISOString():(d&&d.atIso)||"",rows:Object.keys(rows).map(function(k){var r=rows[k];return{key:k,n:r.n,g:r.g||"",sc:r.sc||{}};})};}
 function listenBoard(){
   if(!db)return;
-  col("board").doc("main").onSnapshot(function(snap){S.fb="ok";BOARD=boardFromDoc(snap.exists?snap.data():null);lsSet("gtq_board_cache",BOARD);if(S.tab==="home"||S.tab==="rank"||S.tab==="mine")rerenderSoft();},function(e){fbFail(e);rerenderSoft();});
+  col("board").doc("main").onSnapshot(function(snap){S.fb="ok";BOARD=boardFromDoc(snap.exists?snap.data():null);lsSet("gtq_board_cache",BOARD);syncLocalToServer();if(S.tab==="home"||S.tab==="rank"||S.tab==="mine")rerenderSoft();},function(e){fbFail(e);rerenderSoft();});
+}
+// 관리자가 랭킹/기록을 지우면, 그 사람 폰의 진행 상태(통과·최고점·오답노트 포함)도 그 단계만 처음 상태로 되돌려요.
+// 아직 서버로 전송 중인(대기열) 단계는 건드리지 않아요 — 막 끝낸 결과가 전송되기 전에 잘못 지워지는 걸 막기 위해서예요.
+function syncLocalToServer(){
+  if(!db||!S.player.name)return;
+  var row=boardRowMe(),srvSc=(row&&row.sc)||{};
+  var pend={};queue().forEach(function(q){pend[q.st]=true;});
+  var prog=progress(),changed=false,dropped=[];
+  Object.keys(prog).forEach(function(sid){
+    if(pend[sid])return;
+    if(srvSc[sid]==null&&(prog[sid].first||prog[sid].best)){delete prog[sid];changed=true;dropped.push(sid);}
+  });
+  if(!changed)return;
+  lsSet("gtq_prog2",prog);
+  var h=history().filter(function(x){return dropped.indexOf(x.st)<0;});
+  lsSet("gtq_hist",h);
+  if(S.run&&dropped.indexOf(S.run.stage)>=0){S.run=null;saveRun();}
+  if(!S.modal&&S.screen!=="quiz")render();
 }
 function loadConfig(){
   if(!db)return;
@@ -680,7 +704,7 @@ function finish(){
   var r=S.run,c=0,cat={},dd={};
   r.answers.forEach(function(a){if(a.ok)c++;if(!cat[a.cat])cat[a.cat]=[0,0];cat[a.cat][1]++;if(a.ok)cat[a.cat][0]++;if(!dd[a.d])dd[a.d]=[0,0];dd[a.d][1]++;if(a.ok)dd[a.d][0]++;});
   var t=r.answers.length,s=t?Math.round(c/t*100):0,rk=rankFor(s),wasUnlocked=stages().map(function(_,i){return unlocked(i);});
-  var prog=progress(),p=prog[r.stage]||{tries:0},official=!p.first,now=new Date().toISOString();
+  var prog=progress(),p=prog[r.stage]||{tries:0},official=!officialOf(r.stage),now=new Date().toISOString();
   var res={v:3,st:r.stage,n:S.player.name,g:S.player.group||"",d:now,s:s,c:c,t:t,bs:r.best,ms:Date.now()-r.t0,k:rk.r.name,cat:cat,dd:dd,o:official?1:0,a:r.answers.map(function(a){return[a.qid,a.ok?1:0,a.pick];})};
   p.tries=(p.tries||0)+1;if(official)p.first={s:s,c:c,t:t,d:now};if(!p.best||s>p.best.s)p.best={s:s,d:now};prog[r.stage]=p;lsSet("gtq_prog2",prog);
   var h=history();h.unshift(res);lsSet("gtq_hist",h.slice(0,60));
@@ -703,7 +727,7 @@ function boardRows(){
   if(S.player.name){
     var me={n:S.player.name,g:S.player.group||""},mine={},any=false;
     stages().forEach(function(s){var f=officialOf(s.id);if(f){mine[s.id]=f.s;any=true;}});
-    if(any){var hit=null;rows.forEach(function(r){if(r.n===me.n&&r.g===me.g)hit=r;});
+    if(any){var hit=null;rows.forEach(function(r){if(r.n===me.n&&(r.g||"")===me.g)hit=r;});
       if(!hit){hit={n:me.n,g:me.g,sc:{},me:true};rows.push(hit);}
       hit.me=true;Object.keys(mine).forEach(function(k){if(hit.sc[k]==null){hit.sc[k]=mine[k];hit.wait=true;}});}
   }
@@ -892,10 +916,12 @@ function vAdminResults(){
   var ad=S.admin,f=S.aStage;
   var h='<div class="row2"><button class="btn btn-primary" data-act="refresh">'+ic("retry")+' 새로고침</button><button class="btn" data-act="csv">'+ic("save")+' CSV 저장</button></div>';
   if((ad&&ad.results||[]).length)h+='<button class="btn btn-sm btn-ghost" data-act="del-all" style="margin-top:6px;color:var(--bad,#c0392b)">'+ic("trash")+' 테스트 기록 전체 삭제</button>';
+  if(db)h+='<button class="btn btn-sm btn-ghost" data-act="reset-board" style="margin-top:6px;color:var(--bad,#c0392b)">'+ic("trash")+' 랭킹만 지우기(응시 기록과 무관하게)</button>';
   if(!db)h+='<div class="card pad" style="margin-top:10px"><div class="field" style="margin-bottom:8px"><label for="imp-text">카톡으로 받은 결과 붙여넣기</label><textarea id="imp-text"></textarea></div><button class="btn btn-block" data-act="import">불러오기</button></div>';
   if(!ad)return h+'<div class="card" style="margin-top:12px"><div class="empty">불러오는 중…</div></div>';
+  if(ad.error)h+='<div class="card" style="margin-top:12px"><div class="empty">응시 기록을 불러오지 못했어요. 서버 연결 또는 Firestore 권한 문제일 수 있어요. 위 "랭킹만 지우기" 버튼은 이 문제와 무관하게 동작해요.</div></div>'+vProposals(ad.proposals||[]);
   var all=(ad.results||[]).slice().sort(function(x,y){return x.d<y.d?1:-1;});
-  if(!all.length)return h+'<div class="card" style="margin-top:12px"><div class="empty">아직 응시 결과가 없어요. 링크를 카톡방에 보내 보세요!</div></div>'+vProposals(ad.proposals||[]);
+  if(!all.length)return h+'<div class="card" style="margin-top:12px"><div class="empty">아직 응시 결과가 없어요. 랭킹에 예전 점수가 남아 있다면 위 "랭킹만 지우기" 버튼을 눌러 주세요.</div></div>'+vProposals(ad.proposals||[]);
   var people=officialTable(all);
   h+='<div class="subh">사람별 공식 기록 · 괄호는 최고 점수</div><div class="twrap"><table class="tbl"><thead><tr><th>이름</th>'+stages().map(function(s){return'<th>'+esc(shortName(s.id))+'</th>';}).join("")+'<th>합계</th>'+(db?'<th></th>':'')+'</tr></thead><tbody>'+
     people.map(function(p){return'<tr><td><b>'+esc(p.n)+'</b> <small>'+esc(p.g)+'</small></td>'+stages().map(function(s){var v=p.sc[s.id],b=p.best[s.id];return'<td class="n'+(v!=null&&v>=passScore()?" ok":"")+'">'+(v==null?"–":v+(b>v?' <small>('+b+')</small>':''))+'</td>';}).join("")+'<td class="n"><b>'+totalOf(p.sc)+'</b></td>'+(db?'<td><button class="ibtn del" data-act="del-person" data-k="'+esc(p.key)+'" aria-label="'+esc(p.n)+' 기록 모두 삭제">'+ic("trash")+'</button></td>':'')+'</tr>';}).join("")+'</tbody></table></div>';
@@ -947,7 +973,7 @@ function vGuide(){
     '<h3 style="margin-top:0">서버 상태</h3><p>'+(!db?'<b>설정 안 됨</b> — index.html 위쪽 <code>firebase</code> 설정을 채우면 실시간 랭킹이 켜져요.':S.fb==="err"?'<b>연결 오류</b> — '+esc(S.fbErr):'<b>연결됨</b> — 결과·랭킹·문항이 Firebase에 저장돼요. (프로젝트: '+esc(FBCFG.projectId||"")+', 컬렉션 이름 앞에 <code>'+esc(PFX)+'</code>)')+'</p>'+
     '<h3>연결 오류(permission-denied)가 나면</h3><p>Firebase 콘솔 → Firestore Database → 규칙(Rules)에 아래 네 줄을 추가하고 [게시]를 눌러 주세요.</p><pre>'+esc(rules)+'</pre>'+
     '<h3>운영 방법</h3><ul><li>결과는 응시자가 다 풀면 자동으로 저장되고 랭킹에 바로 반영돼요.</li><li>문항·설정은 고친 뒤 [저장하기] → 모두에게 바로 반영돼요. index.html을 다시 올릴 필요 없어요.</li><li>index.html 안의 문항을 직접 고쳐서 다시 올리면, 그 파일이 더 최신일 때 그 내용이 우선해요.</li><li>잘못 들어온 기록은 [결과] 탭의 휴지통으로 지우고, 필요하면 [랭킹 다시 계산하기]를 눌러요.</li></ul>'+
-    '<h3>공식 기록</h3><ul><li>단계마다 첫 도전 점수가 공식이에요. 다시 풀면 연습으로 저장돼요.</li><li>같은 이름·소속의 가장 이른 기록을 공식으로 봐서, 다른 폰에서 다시 풀어도 공식 점수는 바뀌지 않아요.</li></ul>'+
+    '<h3>공식 기록</h3><ul><li>단계마다 첫 도전 점수가 공식이에요. 다시 풀면 연습으로 저장돼요.</li><li>같은 이름·소속의 가장 이른 기록을 공식으로 봐서, 다른 폰에서 다시 풀어도 공식 점수는 바뀌지 않아요.</li><li>관리자가 [결과] 탭에서 그 사람의 기록이나 랭킹을 지우면, 그 사람 폰에서도 곧바로(새로고침 없이) 그 단계가 처음 상태로 리셋돼요 — 점수·통과(잠금 해제)·오답노트가 모두 지워지고, 다음에 풀 때 그게 새 공식 기록이 돼요.</li></ul>'+
     '<h3>단계 구성</h3><ul>'+stages().map(function(s){return'<li><b>'+esc(s.name)+'</b> — '+esc(s.src)+' · '+poolOf(s.id).length+'문항 중 '+countOf(s.id)+'문항'+(s.timer?' · '+s.timer+'초':'')+'</li>';}).join("")+'</ul></div>';
 }
 
@@ -1050,6 +1076,8 @@ app.addEventListener("click",function(ev){
       confirmBox("응시 기록을 전부 지울까요?","지금까지 쌓인 "+everyone.length+"건(테스트 포함 모든 사람)이 지워지고 랭킹도 초기화돼요. 되돌릴 수 없어요.","전부 지우기",function(){
         if(!db){saveInbox({results:[],proposals:inbox().proposals});loadAdmin().then(function(){toast("모두 지웠어요.");render();});return;}
         Promise.all(everyone.map(function(r){return col("results").doc(r._id).delete();})).then(function(){S.admin.results=[];return rebuildBoard([]);}).then(function(){toast("모두 지웠어요.");render();}).catch(function(e){fbFail(e);toast("실패했어요: "+S.fbErr);});});break;}
+    case"reset-board":confirmBox("랭킹을 전부 지울까요?","지금 뜨는 순위표가 통째로 비워져요. 개별 응시 기록(결과 목록)은 이것과 별개라 남아 있을 수 있어요. 되돌릴 수 없어요.","랭킹 지우기",function(){
+      col("board").doc("main").set({rows:{},at:FV.serverTimestamp()}).then(function(){BOARD={at:"",rows:[]};lsSet("gtq_board_cache",BOARD);toast("랭킹을 지웠어요.");rerenderSoft();render();}).catch(function(e){fbFail(e);toast("실패했어요: "+S.fbErr);});});break;
     case"adopt":{var pid=el.getAttribute("data-p"),p=(S.admin.proposals||[]).filter(function(x){return x.pid===pid;})[0];if(!p)break;
       S.formErr="";S.modal={type:"qedit",isNew:true,fromProposal:pid,q:{id:uid("q"),cat:catObj(p.cat)?p.cat:(DATA.cats[0]||{}).id,d:p.d||2,type:p.type==="ox"?"ox":"mc",q:p.q||"",opts:(p.opts||[]).slice(),ans:typeof p.ans==="number"?p.ans:0,exp:p.exp||""}};render();break;}
     case"del-prop":{var pid2=el.getAttribute("data-p");removeProposal(pid2);break;}
